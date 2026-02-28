@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Strombecker Universal Designer</title>
+    <style>
+        body { font-family: sans-serif; background: #1a1a1a; color: white; margin: 0; overflow: hidden; touch-action: none; }
+        canvas { background: #222; display: block; cursor: grab; }
+        canvas:active { cursor: grabbing; }
+        
+        .toolbar { 
+            position: absolute; bottom: 0; left: 0; right: 0; 
+            background: rgba(0,0,0,0.9); padding: 12px; 
+            display: grid; grid-template-columns: repeat(3, 1fr); 
+            gap: 10px; border-top: 2px solid #444; z-index: 100;
+        }
+        
+        .info-panel {
+            position: absolute; top: 10px; left: 10px; right: 10px;
+            display: flex; justify-content: space-between; pointer-events: none;
+        }
+
+        button { 
+            padding: 12px 5px; font-size: 13px; font-weight: bold;
+            cursor: pointer; background: #444; color: white; 
+            border: 1px solid #666; border-radius: 8px; 
+            transition: background 0.2s;
+        }
+        
+        button:hover { background: #555; }
+        button:active { background: #777; transform: scale(0.95); }
+        .special { background: #2e4a4a; }
+        .danger { background: #633; }
+        
+        .badge { background: rgba(0,0,0,0.8); padding: 6px 12px; border-radius: 20px; border: 1px solid #00ffcc; color: #00ffcc; font-size: 12px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="info-panel">
+        <div class="badge" id="inventory">Pieces: 0</div>
+        <div class="badge" id="snapStatus">Track Open</div>
+    </div>
+
+    <canvas id="trackCanvas"></canvas>
+
+    <div class="toolbar">
+        <button onclick="addPiece('straight')">STRAIGHT</button>
+        <button onclick="addPiece('left')">LEFT 60°</button>
+        <button onclick="addPiece('right')">RIGHT 60°</button>
+        <button class="danger" onclick="undo()">UNDO</button>
+        <button class="special" onclick="centerTrack()">CENTER</button>
+        <button class="danger" onclick="reset()">RESET</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('trackCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Load saved track or start empty
+        let track = JSON.parse(localStorage.getItem('strombecker_track')) || [];
+        
+        let scale = 0.5;
+        let offset = { x: window.innerWidth/2, y: window.innerHeight/3 };
+        let isDragging = false;
+        let lastPos = { x: 0, y: 0 };
+        let initialHypot = 0;
+
+        const STRAIGHT_LEN = 120;
+        const CURVE_RAD = 150; 
+        const TRACK_WIDTH = 35;
+
+        window.onresize = () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            draw();
+        };
+        window.onresize();
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.translate(offset.x, offset.y);
+            ctx.scale(scale, scale);
+
+            let curX = 0, curY = 0, curAngle = 0;
+            
+            // Start Line (Red Dot)
+            ctx.fillStyle = "#ff4444";
+            ctx.beginPath(); ctx.arc(0,0, 8, 0, Math.PI*2); ctx.fill();
+
+            track.forEach((piece, index) => {
+                ctx.strokeStyle = index % 2 === 0 ? "#333" : "#3d3d3d";
+                ctx.lineWidth = TRACK_WIDTH;
+                ctx.lineCap = "butt";
+
+                if (piece.type === 'straight') {
+                    let nX = curX + Math.cos(curAngle * Math.PI/180) * STRAIGHT_LEN;
+                    let nY = curY + Math.sin(curAngle * Math.PI/180) * STRAIGHT_LEN;
+                    ctx.beginPath(); ctx.moveTo(curX, curY); ctx.lineTo(nX, nY); ctx.stroke();
+                    drawSeam(nX, nY, curAngle);
+                    curX = nX; curY = nY;
+                } else {
+                    let dir = piece.type === 'right' ? 1 : -1;
+                    let cX = curX + Math.cos((curAngle + 90 * dir) * Math.PI/180) * CURVE_RAD;
+                    let cY = curY + Math.sin((curAngle + 90 * dir) * Math.PI/180) * CURVE_RAD;
+                    let sA = (curAngle - 90 * dir) * Math.PI/180;
+                    let eA = sA + (60 * dir * Math.PI/180);
+                    ctx.beginPath(); ctx.arc(cX, cY, CURVE_RAD, sA, eA, dir === -1); ctx.stroke();
+                    curAngle += (60 * dir);
+                    curX = cX + Math.cos((curAngle - 90 * dir) * Math.PI/180) * CURVE_RAD;
+                    curY = cY + Math.sin((curAngle - 90 * dir) * Math.PI/180) * CURVE_RAD;
+                    drawSeam(curX, curY, curAngle);
+                }
+            });
+
+            checkClosure(curX, curY);
+            ctx.restore();
+            document.getElementById('inventory').innerText = `Pieces: ${track.length}`;
+            localStorage.setItem('strombecker_track', JSON.stringify(track));
+        }
+
+        function drawSeam(x, y, angle) {
+            ctx.save();
+            ctx.strokeStyle = "#777"; ctx.lineWidth = 2;
+            ctx.beginPath();
+            let perpAngle = (angle + 90) * Math.PI/180;
+            ctx.moveTo(x + Math.cos(perpAngle) * (TRACK_WIDTH/2), y + Math.sin(perpAngle) * (TRACK_WIDTH/2));
+            ctx.lineTo(x - Math.cos(perpAngle) * (TRACK_WIDTH/2), y - Math.sin(perpAngle) * (TRACK_WIDTH/2));
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function checkClosure(x, y) {
+            let dist = Math.sqrt(x*x + y*y);
+            let status = document.getElementById('snapStatus');
+            if (track.length > 2 && dist < 50) {
+                status.innerText = "Loop Closable!";
+                status.style.color = "#0f0";
+                status.style.borderColor = "#0f0";
+            } else {
+                status.innerText = "Gap: " + Math.round(dist/10) + "in";
+                status.style.color = "#00ffcc";
+                status.style.borderColor = "#00ffcc";
+            }
+        }
+
+        // --- MOUSE CONTROLS ---
+        canvas.onmousedown = (e) => { isDragging = true; lastPos = { x: e.clientX, y: e.clientY }; };
+        window.onmousemove = (e) => {
+            if (isDragging) {
+                offset.x += e.clientX - lastPos.x;
+                offset.y += e.clientY - lastPos.y;
+                lastPos = { x: e.clientX, y: e.clientY };
+                draw();
+            }
+        };
+        window.onmouseup = () => isDragging = false;
+        canvas.onwheel = (e) => {
+            e.preventDefault();
+            const zoomIn = e.deltaY < 0;
+            scale *= zoomIn ? 1.1 : 0.9;
+            draw();
+        };
+
+        // --- TOUCH CONTROLS ---
+        canvas.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            if (e.touches.length === 1) {
+                lastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            } else if (e.touches.length === 2) {
+                initialHypot = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+            }
+        }, {passive: false});
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (e.touches.length === 1 && isDragging) {
+                offset.x += e.touches[0].clientX - lastPos.x;
+                offset.y += e.touches[0].clientY - lastPos.y;
+                lastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            } else if (e.touches.length === 2) {
+                let currentHypot = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                scale *= (currentHypot / initialHypot);
+                initialHypot = currentHypot;
+            }
+            draw();
+        }, {passive: false});
+
+        canvas.addEventListener('touchend', () => isDragging = false);
+
+        // --- UI ACTIONS ---
+        function addPiece(t) { track.push({type: t}); draw(); }
+        function undo() { track.pop(); draw(); }
+        function reset() { if(confirm("Clear layout?")) { track = []; draw(); } }
+        function centerTrack() { scale = 0.5; offset = { x: window.innerWidth/2, y: window.innerHeight/3 }; draw(); }
+        
+        draw();
+    </script>
+</body>
+</html>
