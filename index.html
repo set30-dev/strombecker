@@ -2,34 +2,16 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Strombecker String Designer</title>
+    <title>Strombecker Precision Designer</title>
     <style>
         body { font-family: sans-serif; background: #1a1a1a; color: white; margin: 0; overflow: hidden; touch-action: none; }
         canvas { background: #222; display: block; }
-        
-        .toolbar { 
-            position: absolute; bottom: 0; left: 0; right: 0; 
-            background: rgba(0,0,0,0.9); padding: 10px; 
-            display: grid; grid-template-columns: repeat(4, 1fr); 
-            gap: 8px; border-top: 2px solid #444; 
-        }
-        
-        .info-panel {
-            position: absolute; top: 10px; left: 10px; right: 10px;
-            display: flex; justify-content: space-between; pointer-events: none;
-        }
-
-        button { 
-            padding: 12px 2px; font-size: 11px; font-weight: bold;
-            cursor: pointer; background: #444; color: white; 
-            border: 1px solid #666; border-radius: 6px; 
-        }
-        
+        .toolbar { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.9); padding: 10px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; border-top: 2px solid #444; }
+        .info-panel { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; pointer-events: none; }
+        button { padding: 12px 2px; font-size: 11px; font-weight: bold; cursor: pointer; background: #444; color: white; border: 1px solid #666; border-radius: 6px; }
         button:active { background: #666; transform: scale(0.95); }
         .special { background: #2e4a4a; }
         .danger { background: #633; }
-        .save-btn { background: #4a4a2e; }
-        
         .badge { background: rgba(0,0,0,0.8); padding: 6px 12px; border-radius: 20px; border: 1px solid #00ffcc; color: #00ffcc; font-size: 12px; font-weight: bold; }
     </style>
 </head>
@@ -38,17 +20,14 @@
         <div class="badge" id="inventory">Pieces: 0</div>
         <div class="badge" id="trackLength">0.0 ft</div>
     </div>
-
     <canvas id="trackCanvas"></canvas>
-
     <div class="toolbar">
         <button onclick="addPiece('S')">STRAIGHT (S)</button>
         <button onclick="addPiece('L')">LEFT (L)</button>
         <button onclick="addPiece('R')">RIGHT (R)</button>
         <button class="danger" onclick="undo()">UNDO</button>
-        
-        <button class="save-btn" onclick="exportTrack()">EXPORT</button>
-        <button class="save-btn" onclick="importTrack()">IMPORT</button>
+        <button onclick="exportTrack()">EXPORT</button>
+        <button onclick="importTrack()">IMPORT</button>
         <button class="special" onclick="centerTrack()">CENTER</button>
         <button class="danger" onclick="reset()">RESET</button>
     </div>
@@ -57,14 +36,19 @@
         const canvas = document.getElementById('trackCanvas');
         const ctx = canvas.getContext('2d');
         
-        let track = JSON.parse(localStorage.getItem('strom_v2')) || [];
-        let scale = 0.5;
-        let offset = { x: window.innerWidth/2, y: window.innerHeight/3 };
-        let isDragging = false, lastPos = { x: 0, y: 0 }, initialHypot = 0;
+        // PHYSICAL CONSTANTS (In "Inches" for the math)
+        const REAL_STRAIGHT = 12.125; 
+        const OUTSIDE_DIAMETER = 28.0;
+        const TRACK_WIDTH = 7.0; 
+        const CENTER_RADIUS = (OUTSIDE_DIAMETER / 2) - (TRACK_WIDTH / 2); // 10.5 inches
+        
+        // VISUAL SCALE (Pixels per inch)
+        const PPI = 15; 
 
-        const STRAIGHT_LEN = 120; // Represents 12 inches
-        const CURVE_RAD = 150; 
-        const TRACK_WIDTH = 35;
+        let track = JSON.parse(localStorage.getItem('strom_v3')) || [];
+        let scale = 0.4;
+        let offset = { x: window.innerWidth/2, y: window.innerHeight/2 };
+        let isDragging = false, lastPos = { x: 0, y: 0 }, initialHypot = 0;
 
         window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; draw(); };
         window.onresize();
@@ -76,65 +60,66 @@
             ctx.scale(scale, scale);
 
             let curX = 0, curY = 0, curAngle = 0, totalInches = 0;
+            
+            // Start Marker
             ctx.fillStyle = "#ff4444";
-            ctx.beginPath(); ctx.arc(0,0, 8, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(0,0, 10, 0, Math.PI*2); ctx.fill();
 
             track.forEach((type, index) => {
                 ctx.strokeStyle = index % 2 === 0 ? "#333" : "#3d3d3d";
-                ctx.lineWidth = TRACK_WIDTH;
+                ctx.lineWidth = TRACK_WIDTH * PPI;
                 ctx.lineCap = "butt";
 
                 if (type === 'S') {
-                    let nX = curX + Math.cos(curAngle * Math.PI/180) * STRAIGHT_LEN;
-                    let nY = curY + Math.sin(curAngle * Math.PI/180) * STRAIGHT_LEN;
+                    let moveDist = REAL_STRAIGHT * PPI;
+                    let nX = curX + Math.cos(curAngle * Math.PI/180) * moveDist;
+                    let nY = curY + Math.sin(curAngle * Math.PI/180) * moveDist;
                     ctx.beginPath(); ctx.moveTo(curX, curY); ctx.lineTo(nX, nY); ctx.stroke();
                     drawSeam(nX, nY, curAngle);
                     curX = nX; curY = nY;
-                    totalInches += 12;
+                    totalInches += REAL_STRAIGHT;
                 } else {
                     let dir = type === 'R' ? 1 : -1;
-                    let cX = curX + Math.cos((curAngle + 90 * dir) * Math.PI/180) * CURVE_RAD;
-                    let cY = curY + Math.sin((curAngle + 90 * dir) * Math.PI/180) * CURVE_RAD;
+                    let radPixels = CENTER_RADIUS * PPI;
+                    let cX = curX + Math.cos((curAngle + 90 * dir) * Math.PI/180) * radPixels;
+                    let cY = curY + Math.sin((curAngle + 90 * dir) * Math.PI/180) * radPixels;
                     let sA = (curAngle - 90 * dir) * Math.PI/180;
                     let eA = sA + (60 * dir * Math.PI/180);
-                    ctx.beginPath(); ctx.arc(cX, cY, CURVE_RAD, sA, eA, dir === -1); ctx.stroke();
+                    
+                    ctx.beginPath(); ctx.arc(cX, cY, radPixels, sA, eA, dir === -1); ctx.stroke();
+                    
                     curAngle += (60 * dir);
-                    curX = cX + Math.cos((curAngle - 90 * dir) * Math.PI/180) * CURVE_RAD;
-                    curY = cY + Math.sin((curAngle - 90 * dir) * Math.PI/180) * CURVE_RAD;
+                    curX = cX + Math.cos((curAngle - 90 * dir) * Math.PI/180) * radPixels;
+                    curY = cY + Math.sin((curAngle - 90 * dir) * Math.PI/180) * radPixels;
                     drawSeam(curX, curY, curAngle);
-                    // Arc length for 60 degrees of a circle: (60/360) * 2 * PI * R
-                    // Based on 150px = approx 15" radius, 60 deg is ~15.7 inches
-                    totalInches += 15.7;
+                    
+                    // Arc length = (angle/360) * 2 * PI * R
+                    totalInches += (60 / 360) * 2 * Math.PI * CENTER_RADIUS;
                 }
             });
 
             ctx.restore();
             document.getElementById('inventory').innerText = `Pieces: ${track.length}`;
             document.getElementById('trackLength').innerText = `${(totalInches/12).toFixed(1)} ft`;
-            localStorage.setItem('strom_v2', JSON.stringify(track));
+            localStorage.setItem('strom_v3', JSON.stringify(track));
         }
 
         function drawSeam(x, y, angle) {
             ctx.save();
-            ctx.strokeStyle = "#777"; ctx.lineWidth = 2;
+            ctx.strokeStyle = "#888"; ctx.lineWidth = 2;
             ctx.beginPath();
             let perpAngle = (angle + 90) * Math.PI/180;
-            ctx.moveTo(x + Math.cos(perpAngle) * (TRACK_WIDTH/2), y + Math.sin(perpAngle) * (TRACK_WIDTH/2));
-            ctx.lineTo(x - Math.cos(perpAngle) * (TRACK_WIDTH/2), y - Math.sin(perpAngle) * (TRACK_WIDTH/2));
+            let halfW = (TRACK_WIDTH * PPI) / 2;
+            ctx.moveTo(x + Math.cos(perpAngle) * halfW, y + Math.sin(perpAngle) * halfW);
+            ctx.lineTo(x - Math.cos(perpAngle) * halfW, y - Math.sin(perpAngle) * halfW);
             ctx.stroke();
             ctx.restore();
         }
 
-        function exportTrack() {
-            prompt("Your Track String:", track.join(''));
-        }
-
+        function exportTrack() { prompt("Your Track String:", track.join('')); }
         function importTrack() {
-            const input = prompt("Paste your track string (e.g. SSLLLSSLLL):");
-            if (input) {
-                const parts = input.toUpperCase().replace(/[^SLR]/g, '').split('');
-                if(parts.length > 0) { track = parts; draw(); }
-            }
+            const input = prompt("Paste your track string:");
+            if (input) { track = input.toUpperCase().replace(/[^SLR]/g, '').split(''); draw(); }
         }
 
         // Controls
@@ -149,7 +134,7 @@
         function addPiece(t) { track.push(t); draw(); }
         function undo() { track.pop(); draw(); }
         function reset() { if(confirm("Clear layout?")) { track = []; draw(); } }
-        function centerTrack() { scale = 0.5; offset = { x: window.innerWidth/2, y: window.innerHeight/3 }; draw(); }
+        function centerTrack() { scale = 0.4; offset = { x: window.innerWidth/2, y: window.innerHeight/2 }; draw(); }
         draw();
     </script>
 </body>
