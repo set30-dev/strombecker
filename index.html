@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Strombecker Designer v2.0.11</title>
+    <title>Strombecker Designer v2.0.13</title>
     <style>
         body { font-family: sans-serif; background: #1a1a1a; color: white; margin: 0; overflow: hidden; touch-action: none; }
         canvas { background: #222; display: block; cursor: grab; }
@@ -11,24 +11,34 @@
         button { padding: 12px 2px; font-size: 11px; font-weight: bold; cursor: pointer; background: #444; color: white; border: 1px solid #666; border-radius: 6px; }
         button:hover { background: #555; }
         .x-btn { background: #4a2e4a; border-color: #ff00ff; color: #ff00ff; }
-        .badge { background: rgba(0,0,0,0.85); padding: 8px 15px; border-radius: 8px; border: 1px solid #444; color: #fff; font-size: 12px; line-height: 1.4; }
+        .badge { background: rgba(0,0,0,0.85); padding: 8px 15px; border-radius: 8px; border: 1px solid #444; color: #fff; font-size: 12px; line-height: 1.4; pointer-events: auto; }
         .l1-text { color: #ff4444; font-weight: bold; }
         .l2-text { color: #44aaff; font-weight: bold; }
         .danger { background: #633; }
-        .table-size { position: absolute; top: 100px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.05); color: #ccc; padding: 4px 12px; border-radius: 4px; font-size: 14px; border: 1px solid #444; font-weight: bold; }
+        .inventory { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+        .inv-item { background: rgba(0,0,0,0.8); padding: 5px 12px; border-radius: 4px; border: 1px solid #555; font-size: 12px; text-align: center; }
+        .inv-label { display: block; font-size: 9px; color: #aaa; text-transform: uppercase; }
+        .table-size { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.05); color: #ccc; padding: 4px 12px; border-radius: 4px; font-size: 14px; border: 1px solid #444; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="info-panel">
         <div class="badge" id="stats">
-            Pieces: 0<br>
             Lane 1 (Red): <span class="l1-text">0.0 ft</span><br>
             Lane 2 (Blue): <span class="l2-text">0.0 ft</span>
         </div>
-        <div style="color:rgba(255,255,255,0.3); font-size:10px; font-weight: bold;">v2.0.11</div>
+        <div style="color:rgba(255,255,255,0.3); font-size:10px; font-weight: bold;">v2.0.13</div>
     </div>
+
+    <div class="inventory" id="inventory">
+        <div class="inv-item"><span class="inv-label">Straight</span><span id="count-S">0</span></div>
+        <div class="inv-item"><span class="inv-label">Curves</span><span id="count-C">0</span></div>
+        <div class="inv-item"><span class="inv-label">Crossover</span><span id="count-X">0</span></div>
+    </div>
+
     <div class="table-size" id="tableDimensions">Table: 0' x 0'</div>
     <canvas id="trackCanvas"></canvas>
+    
     <div class="toolbar">
         <button onmouseenter="setGhost('S')" onmouseleave="setGhost(null)" onclick="addPiece('S')">STRAIGHT (S)</button>
         <button onmouseenter="setGhost('L')" onmouseleave="setGhost(null)" onclick="addPiece('L')">LEFT (L)</button>
@@ -47,7 +57,7 @@
         const SLOT_SPACING = 3.5, PPI = 15;
         const CENTER_RADIUS = (OUTSIDE_DIAMETER / 2) - (TRACK_WIDTH / 2); 
 
-        let track = JSON.parse(localStorage.getItem('strom_v2010')) || [];
+        let track = JSON.parse(localStorage.getItem('strom_v2013')) || [];
         let ghostPiece = null;
         let scale = 0.4, offset = { x: window.innerWidth/2, y: window.innerHeight/2 };
         let isDragging = false, lastPos = { x: 0, y: 0 };
@@ -63,12 +73,16 @@
             let l1Dist = 0, l2Dist = 0;
             let carRedSlot = 0; // 0 = Left Slot, 1 = Right Slot
             let bounds = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+            let counts = { S: 0, C: 0, X: 0 };
 
             track.forEach((type, index) => {
                 let res = renderPiece(type, curX, curY, curAngle, false, index % 2 === 0, index === 0, carRedSlot);
-                curX = res.x; curY = res.y; curAngle = res.angle;
                 
-                // Track distances based on which lane the Red car is currently in
+                if (type === 'S') counts.S++;
+                else if (type === 'X') counts.X++;
+                else counts.C++;
+
+                // Red car is Lane 1, Blue car is Lane 2
                 if (carRedSlot === 0) {
                     l1Dist += res.distLeft;
                     l2Dist += res.distRight;
@@ -79,6 +93,7 @@
 
                 if (type === 'X') carRedSlot = 1 - carRedSlot;
                 
+                curX = res.x; curY = res.y; curAngle = res.angle;
                 bounds.minX = Math.min(bounds.minX, curX); bounds.maxX = Math.max(bounds.maxX, curX);
                 bounds.minY = Math.min(bounds.minY, curY); bounds.maxY = Math.max(bounds.maxY, curY);
             });
@@ -86,10 +101,14 @@
             if (ghostPiece) renderPiece(ghostPiece, curX, curY, curAngle, true, false, false, carRedSlot);
             ctx.restore();
 
-            document.getElementById('stats').innerHTML = `Pieces: ${track.length}<br>Lane 1 (Red): <span class="l1-text">${(l1Dist/12).toFixed(2)} ft</span><br>Lane 2 (Blue): <span class="l2-text">${(l2Dist/12).toFixed(2)} ft</span>`;
+            document.getElementById('stats').innerHTML = `Lane 1 (Red): <span class="l1-text">${(l1Dist/12).toFixed(2)} ft</span><br>Lane 2 (Blue): <span class="l2-text">${(l2Dist/12).toFixed(2)} ft</span>`;
+            document.getElementById('count-S').innerText = counts.S;
+            document.getElementById('count-C').innerText = counts.C;
+            document.getElementById('count-X').innerText = counts.X;
+
             const wIn = (bounds.maxX-bounds.minX)/PPI, hIn = (bounds.maxY-bounds.minY)/PPI;
             document.getElementById('tableDimensions').innerText = `Table: ${Math.floor(wIn/12)}' ${Math.round(wIn%12)}" x ${Math.floor(hIn/12)}' ${Math.round(hIn%12)}"`;
-            localStorage.setItem('strom_v2010', JSON.stringify(track));
+            localStorage.setItem('strom_v2013', JSON.stringify(track));
         }
 
         function renderPiece(type, x, y, angle, isGhost, altColor, isHome, carRedSlot) {
@@ -97,8 +116,13 @@
             const slotOff = (SLOT_SPACING / 2) * PPI;
             const rad = angle * Math.PI / 180;
             ctx.lineCap = "butt";
-            if (isGhost) { ctx.strokeStyle = "rgba(255,255,255,0.1)"; ctx.setLineDash([10,10]); }
-            else { ctx.strokeStyle = isHome ? "#4682B4" : (type === 'X' ? "#222" : (altColor ? "#333" : "#3d3d3d")); }
+            
+            if (isGhost) { 
+                ctx.strokeStyle = "rgba(255,255,255,0.1)"; 
+                ctx.setLineDash([10,10]); 
+            } else { 
+                ctx.strokeStyle = isHome ? "#4682B4" : (type === 'X' ? "#222" : (altColor ? "#333" : "#3d3d3d")); 
+            }
             ctx.lineWidth = TRACK_WIDTH * PPI;
 
             let nX, nY, nAngle = angle, distLeft, distRight;
@@ -108,22 +132,21 @@
                 nX = x + Math.cos(rad) * d; nY = y + Math.sin(rad) * d;
                 ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nX, nY); ctx.stroke();
                 
-                if (type === 'S') {
-                    distLeft = distRight = REAL_STRAIGHT;
-                } else {
-                    // Crossover diagonal distance: sqrt(straight^2 + slotSpacing^2)
-                    distLeft = distRight = Math.sqrt(Math.pow(REAL_STRAIGHT, 2) + Math.pow(SLOT_SPACING, 2));
-                }
+                distLeft = distRight = (type === 'S') ? REAL_STRAIGHT : Math.sqrt(Math.pow(REAL_STRAIGHT, 2) + Math.pow(SLOT_SPACING, 2));
 
                 if (!isGhost) {
                     ctx.setLineDash([]); ctx.lineWidth = 2.5;
                     let p1 = rad - Math.PI/2, p2 = rad + Math.PI/2;
+                    
+                    // Lane Color logic
                     let cLeft = (carRedSlot === 0) ? "#ff4444" : "#44aaff";
                     let cRight = (carRedSlot === 1) ? "#ff4444" : "#44aaff";
+
                     if (type === 'S') {
                         ctx.strokeStyle = cLeft; ctx.beginPath(); ctx.moveTo(x+Math.cos(p1)*slotOff, y+Math.sin(p1)*slotOff); ctx.lineTo(nX+Math.cos(p1)*slotOff, nY+Math.sin(p1)*slotOff); ctx.stroke();
                         ctx.strokeStyle = cRight; ctx.beginPath(); ctx.moveTo(x+Math.cos(p2)*slotOff, y+Math.sin(p2)*slotOff); ctx.lineTo(nX+Math.cos(p2)*slotOff, nY+Math.sin(p2)*slotOff); ctx.stroke();
                     } else {
+                        // CROSSOVER visual color swap
                         ctx.strokeStyle = cLeft; ctx.beginPath(); ctx.moveTo(x+Math.cos(p1)*slotOff, y+Math.sin(p1)*slotOff); ctx.lineTo(nX+Math.cos(p2)*slotOff, nY+Math.sin(p2)*slotOff); ctx.stroke();
                         ctx.strokeStyle = cRight; ctx.beginPath(); ctx.moveTo(x+Math.cos(p2)*slotOff, y+Math.sin(p2)*slotOff); ctx.lineTo(nX+Math.cos(p1)*slotOff, nY+Math.sin(p1)*slotOff); ctx.stroke();
                     }
@@ -133,6 +156,7 @@
                 let rP = CENTER_RADIUS * PPI;
                 let cX = x + Math.cos((angle+90*dir)*Math.PI/180)*rP, cY = y + Math.sin((angle+90*dir)*Math.PI/180)*rP;
                 let sA = (angle-90*dir)*Math.PI/180, eA = sA + (60 * dir * Math.PI/180);
+                
                 ctx.beginPath(); ctx.arc(cX, cY, rP, sA, eA, dir === -1); ctx.stroke();
                 nAngle = angle + (60 * dir);
                 nX = cX + Math.cos((nAngle-90*dir)*Math.PI/180)*rP; nY = cY + Math.sin((nAngle-90*dir)*Math.PI/180)*rP;
@@ -140,16 +164,18 @@
                 let dIn = (60/360)*2*Math.PI*(CENTER_RADIUS - (SLOT_SPACING/2));
                 let dOut = (60/360)*2*Math.PI*(CENTER_RADIUS + (SLOT_SPACING/2));
                 
-                // Left curve: Left slot is Inner. Right curve: Left slot is Outer.
                 if (type === 'L') { distLeft = dIn; distRight = dOut; }
                 else { distLeft = dOut; distRight = dIn; }
 
                 if (!isGhost) {
                     ctx.setLineDash([]); ctx.lineWidth = 2.5;
+                    // Draw Left (Inner if Left turn, Outer if Right turn)
                     ctx.strokeStyle = (carRedSlot === 0) ? "#ff4444" : "#44aaff";
-                    ctx.beginPath(); ctx.arc(cX, cY, rP - slotOff, sA, eA, dir === -1); ctx.stroke();
+                    ctx.beginPath(); ctx.arc(cX, cY, rP + (type === 'L' ? -slotOff : slotOff), sA, eA, dir === -1); ctx.stroke();
+                    
+                    // Draw Right (Outer if Left turn, Inner if Right turn)
                     ctx.strokeStyle = (carRedSlot === 1) ? "#ff4444" : "#44aaff";
-                    ctx.beginPath(); ctx.arc(cX, cY, rP + slotOff, sA, eA, dir === -1); ctx.stroke();
+                    ctx.beginPath(); ctx.arc(cX, cY, rP + (type === 'L' ? slotOff : -slotOff), sA, eA, dir === -1); ctx.stroke();
                 }
             }
             ctx.restore();
