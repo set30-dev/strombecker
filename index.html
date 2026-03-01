@@ -2,41 +2,56 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Strombecker Designer v2.0.14</title>
+    <title>Strombecker Designer v2.0.16</title>
     <style>
         body { font-family: sans-serif; background: #1a1a1a; color: white; margin: 0; overflow: hidden; touch-action: none; }
         canvas { background: #222; display: block; cursor: grab; }
         .toolbar { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.9); padding: 10px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; border-top: 2px solid #444; z-index: 10; }
-        .info-panel { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; pointer-events: none; }
+        .info-panel { position: absolute; top: 10px; right: 10px; pointer-events: none; }
+        
+        .main-title { position: absolute; top: 10px; width: 100%; text-align: center; font-size: 18px; font-weight: bold; letter-spacing: 1px; color: #eee; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); pointer-events: none; z-index: 5; }
+        
         button { padding: 12px 2px; font-size: 11px; font-weight: bold; cursor: pointer; background: #444; color: white; border: 1px solid #666; border-radius: 6px; }
         button:hover { background: #555; }
         .x-btn { background: #4a2e4a; border-color: #ff00ff; color: #ff00ff; }
-        .badge { background: rgba(0,0,0,0.85); padding: 8px 15px; border-radius: 8px; border: 1px solid #444; color: #fff; font-size: 12px; line-height: 1.4; pointer-events: auto; }
-        .l1-text { color: #ff4444; font-weight: bold; }
-        .l2-text { color: #44aaff; font-weight: bold; }
-        .danger { background: #633; }
-        .inventory { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+        
+        .stats-container { position: absolute; top: 45px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
+        
+        .inventory { display: flex; gap: 10px; pointer-events: auto; }
         .inv-item { background: rgba(0,0,0,0.8); padding: 5px 12px; border-radius: 4px; border: 1px solid #555; font-size: 12px; text-align: center; }
         .inv-label { display: block; font-size: 9px; color: #aaa; text-transform: uppercase; }
-        .table-size { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.05); color: #ccc; padding: 4px 12px; border-radius: 4px; font-size: 14px; border: 1px solid #444; font-weight: bold; }
+        
+        .table-size { background: rgba(255,255,255,0.05); color: #ccc; padding: 4px 12px; border-radius: 4px; font-size: 14px; border: 1px solid #444; font-weight: bold; pointer-events: auto; }
+        
+        .badge { background: rgba(0,0,0,0.85); padding: 8px 15px; border-radius: 8px; border: 1px solid #444; color: #fff; font-size: 12px; line-height: 1.4; pointer-events: auto; text-align: center; }
+        .l1-text { color: #ff4444; font-weight: bold; }
+        .l2-text { color: #44aaff; font-weight: bold; }
+        
+        .danger { background: #633; }
     </style>
 </head>
 <body>
+    <div class="main-title">1/32 Scale Strombecker Track Layout</div>
+
     <div class="info-panel">
+        <div style="color:rgba(255,255,255,0.3); font-size:10px; font-weight: bold;">v2.0.16</div>
+    </div>
+
+    <div class="stats-container">
+        <div class="inventory" id="inventory">
+            <div class="inv-item"><span class="inv-label">Straight</span><span id="count-S">0</span></div>
+            <div class="inv-item"><span class="inv-label">Curves</span><span id="count-C">0</span></div>
+            <div class="inv-item"><span class="inv-label">Crossover</span><span id="count-X">0</span></div>
+        </div>
+
+        <div class="table-size" id="tableDimensions">Table: 0' x 0'</div>
+
         <div class="badge" id="stats">
-            Lane 1 (Red): <span class="l1-text">0.0 ft</span><br>
+            Lane 1 (Red): <span class="l1-text">0.0 ft</span> | 
             Lane 2 (Blue): <span class="l2-text">0.0 ft</span>
         </div>
-        <div style="color:rgba(255,255,255,0.3); font-size:10px; font-weight: bold;">v2.0.14</div>
     </div>
 
-    <div class="inventory" id="inventory">
-        <div class="inv-item"><span class="inv-label">Straight</span><span id="count-S">0</span></div>
-        <div class="inv-item"><span class="inv-label">Curves</span><span id="count-C">0</span></div>
-        <div class="inv-item"><span class="inv-label">Crossover</span><span id="count-X">0</span></div>
-    </div>
-
-    <div class="table-size" id="tableDimensions">Table: 0' x 0'</div>
     <canvas id="trackCanvas"></canvas>
     
     <div class="toolbar">
@@ -53,6 +68,7 @@
     <script>
         const canvas = document.getElementById('trackCanvas');
         const ctx = canvas.getContext('2d');
+        // Fundamental Geometry
         const REAL_STRAIGHT = 12.125, OUTSIDE_DIAMETER = 28.0, TRACK_WIDTH = 7.0; 
         const SLOT_SPACING = 3.5, PPI = 15;
         const CENTER_RADIUS = (OUTSIDE_DIAMETER / 2) - (TRACK_WIDTH / 2); 
@@ -101,7 +117,7 @@
             if (ghostPiece) renderPiece(ghostPiece, curX, curY, curAngle, true, false, false, carRedSlot);
             ctx.restore();
 
-            document.getElementById('stats').innerHTML = `Lane 1 (Red): <span class="l1-text">${(l1Dist/12).toFixed(2)} ft</span><br>Lane 2 (Blue): <span class="l2-text">${(l2Dist/12).toFixed(2)} ft</span>`;
+            document.getElementById('stats').innerHTML = `Lane 1 (Red): <span class="l1-text">${(l1Dist/12).toFixed(2)} ft</span> | Lane 2 (Blue): <span class="l2-text">${(l2Dist/12).toFixed(2)} ft</span>`;
             document.getElementById('count-S').innerText = counts.S;
             document.getElementById('count-C').innerText = counts.C;
             document.getElementById('count-X').innerText = counts.X;
@@ -186,7 +202,7 @@
             if (input !== null) { track = input.toUpperCase().replace(/[^SLRX]/g, '').split(''); draw(); }
         }
 
-        // --- Interaction Handlers ---
+        // Improved Touch Interaction for Mobile
         canvas.addEventListener('touchstart', (e) => {
             isDragging = true;
             if (e.touches.length === 2) {
@@ -215,6 +231,7 @@
 
         window.addEventListener('touchend', () => { isDragging = false; initialDist = null; });
 
+        // Mouse Handlers
         canvas.onmousedown = (e) => { isDragging = true; lastPos = { x: e.clientX, y: e.clientY }; };
         window.onmousemove = (e) => { if (isDragging) { offset.x += e.clientX-lastPos.x; offset.y += e.clientY-lastPos.y; lastPos = { x: e.clientX, y: e.clientY }; draw(); } };
         window.onmouseup = () => isDragging = false;
