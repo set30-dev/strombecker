@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Strombecker Designer v2.3</title>
+    <style>
+        body { font-family: sans-serif; background: #1a1a1a; color: white; margin: 0; overflow: hidden; touch-action: none; }
+        canvas { background: #222; display: block; cursor: crosshair; }
+        .toolbar { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.9); padding: 10px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; border-top: 2px solid #444; z-index: 10; }
+        .info-panel { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+        .version-top { color: rgba(255,255,255,0.4); font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
+        
+        .edit-panel { position: absolute; right: 10px; top: 80px; width: 150px; background: rgba(20,20,20,0.95); padding: 15px; border-radius: 8px; border: 2px solid gold; display: none; flex-direction: column; gap: 8px; z-index: 20; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        .edit-panel h3 { margin: 0 0 5px 0; font-size: 11px; color: gold; text-align: center; letter-spacing: 1px;}
+        .section-label { font-size: 9px; color: #888; margin-top: 5px; text-transform: uppercase; }
+        
+        button { padding: 10px 2px; font-size: 11px; font-weight: bold; cursor: pointer; background: #444; color: white; border: 1px solid #666; border-radius: 6px; }
+        button:hover { background: #555; }
+        .special { background: #2e4a4a; }
+        .sync-btn { background: #4a4a2e; }
+        .danger { background: #633; }
+        .edit-btn { background: #5c4d21; border-color: gold; color: gold; }
+        .insert-btn { background: #215c3a; border-color: #00ffcc; color: #00ffcc; }
+        
+        .badge { background: rgba(0,0,0,0.8); padding: 6px 12px; border-radius: 20px; border: 1px solid #00ffcc; color: #00ffcc; font-size: 12px; font-weight: bold; min-width: 60px; text-align: center; }
+        .table-size { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); background: rgba(0,255,204,0.15); color: #00ffcc; padding: 4px 12px; border-radius: 4px; font-size: 14px; border: 1px solid #00ffcc; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="info-panel">
+        <div class="badge" id="inventory">Pieces: 0</div>
+        <div class="version-top">v2.3 Edit & Insert</div>
+        <div class="badge" id="trackLength">0.0 ft</div>
+    </div>
+    <div class="table-size" id="tableDimensions">Table: 0' x 0'</div>
+
+    <div class="edit-panel" id="editPanel">
+        <h3>TRACK EDITOR</h3>
+        
+        <div class="section-label">Change Selection</div>
+        <button class="edit-btn" onclick="modifyPiece('S')">TO STRAIGHT</button>
+        <button class="edit-btn" onclick="modifyPiece('L')">TO LEFT</button>
+        <button class="edit-btn" onclick="modifyPiece('R')">TO RIGHT</button>
+        
+        <div class="section-label">Insert After</div>
+        <button class="insert-btn" onclick="insertPiece('S')">+ STRAIGHT</button>
+        <button class="insert-btn" onclick="insertPiece('L')">+ LEFT</button>
+        <button class="insert-btn" onclick="insertPiece('R')">+ RIGHT</button>
+        
+        <hr style="width:100%; border:0; border-top:1px solid #444; margin: 5px 0;">
+        <button class="danger" onclick="modifyPiece('DEL')">DELETE PIECE</button>
+        <button onclick="closeEdit()">CANCEL</button>
+    </div>
+
+    <canvas id="trackCanvas"></canvas>
+    
+    <div class="toolbar">
+        <button onclick="addPiece('S')">ADD STRAIGHT</button>
+        <button onclick="addPiece('L')">ADD LEFT</button>
+        <button onclick="addPiece('R')">ADD RIGHT</button>
+        <button class="danger" onclick="undo()">UNDO LAST</button>
+        <button class="sync-btn" onclick="syncTrack()">IMPORT/EXPORT</button>
+        <button class="special" onclick="centerTrack()">CENTER</button>
+        <button class="danger" onclick="reset()">RESET ALL</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('trackCanvas');
+        const ctx = canvas.getContext('2d');
+        const REAL_STRAIGHT = 12.125, OUTSIDE_DIAMETER = 28.0, TRACK_WIDTH = 7.0; 
+        const CENTER_RADIUS = (OUTSIDE_DIAMETER / 2) - (TRACK_WIDTH / 2), PPI = 15; 
+
+        let track = JSON.parse(localStorage.getItem('strom_v23')) || [];
+        let selectedIdx = -1, scale = 0.4, offset = { x: window.innerWidth/2, y: window.innerHeight/2 };
+        let isDragging = false, lastPos = { x: 0, y: 0 }, dragThreshold = false;
+
+        window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; draw(); };
+        window.onresize();
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save(); ctx.translate(offset.x, offset.y); ctx.scale(scale, scale);
+
+            let curX = 0, curY = 0, curAngle = 0, totalInches = 0;
+            let bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+
+            function updateBounds(px, py, angle) {
+                const hw = (TRACK_WIDTH / 2) * PPI;
+                const rad = angle * Math.PI / 180;
+                [{a:rad+Math.PI/2},{a:rad-Math.PI/2}].forEach(r => {
+                    let cx = px + Math.cos(r.a) * hw, cy = py + Math.sin(r.a) * hw;
+                    bounds.minX = Math.min(bounds.minX, cx); bounds.maxX = Math.max(bounds.maxX, cx);
+                    bounds.minY = Math.min(bounds.minY, cy); bounds.maxY = Math.max(bounds.maxY, cy);
+                });
+            }
+
+            updateBounds(0, 0, 0);
+
+            track.forEach((type, index) => {
+                let res = renderPiece(type, curX, curY, curAngle, index === selectedIdx, index % 2 === 0, index === 0);
+                curX = res.x; curY = res.y; curAngle = res.angle; totalInches += res.len;
+                updateBounds(curX, curY, curAngle);
+                if (type !== 'S') {
+                    let dir = type === 'R' ? 1 : -1, rP = CENTER_RADIUS * PPI;
+                    let cX = res.prevX + Math.cos((res.prevAngle + 90 * dir) * Math.PI/180) * rP, cY = res.prevY + Math.sin((res.prevAngle + 90 * dir) * Math.PI/180) * rP;
+                    for(let a=15; a<60; a+=15) {
+                        let chA = res.prevAngle + (a * dir);
+                        updateBounds(cX + Math.cos((chA - 90 * dir) * Math.PI/180) * rP, cY + Math.sin((chA - 90 * dir) * Math.PI/180) * rP, chA);
+                    }
+                }
+            });
+
+            if (track.length > 0) {
+                ctx.setLineDash([5, 5]); ctx.strokeStyle = "rgba(0, 255, 204, 0.4)"; ctx.lineWidth = 2;
+                ctx.strokeRect(bounds.minX, bounds.minY, bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+                const wIn = (bounds.maxX - bounds.minX) / PPI, hIn = (bounds.maxY - bounds.minY) / PPI;
+                document.getElementById('tableDimensions').innerText = `Required Table: ${Math.floor(wIn/12)}' ${Math.round(wIn%12)}" x ${Math.floor(hIn/12)}' ${Math.round(hIn%12)}"`;
+            }
+            ctx.restore();
+            document.getElementById('inventory').innerText = `Pieces: ${track.length}`;
+            document.getElementById('trackLength').innerText = `${(totalInches/12).toFixed(1)} ft`;
+            localStorage.setItem('strom_v23', JSON.stringify(track));
+        }
+
+        function renderPiece(type, x, y, angle, isSelected, altColor, isHome) {
+            ctx.save();
+            let trackPixels = TRACK_WIDTH * PPI;
+            ctx.lineCap = "butt"; ctx.lineWidth = trackPixels;
+
+            if (isSelected) { ctx.strokeStyle = "gold"; ctx.shadowBlur = 15; ctx.shadowColor = "gold"; }
+            else if (isHome) { ctx.strokeStyle = "#4682B4"; }
+            else { ctx.strokeStyle = altColor ? "#333" : "#3d3d3d"; }
+
+            let nX, nY, nAngle = angle, pLen = 0;
+            if (type === 'S') {
+                let d = REAL_STRAIGHT * PPI;
+                nX = x + Math.cos(angle * Math.PI/180) * d; nY = y + Math.sin(angle * Math.PI/180) * d;
+                ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nX, nY); ctx.stroke();
+                pLen = REAL_STRAIGHT;
+            } else {
+                let dir = type === 'R' ? 1 : -1, rP = CENTER_RADIUS * PPI;
+                let cX = x + Math.cos((angle + 90 * dir) * Math.PI/180) * rP, cY = y + Math.sin((angle + 90 * dir) * Math.PI/180) * rP;
+                let sA = (angle - 90 * dir) * Math.PI/180, eA = sA + (60 * dir * Math.PI/180);
+                ctx.beginPath(); ctx.arc(cX, cY, rP, sA, eA, dir === -1); ctx.stroke();
+                nAngle = angle + (60 * dir);
+                nX = cX + Math.cos((nAngle - 90 * dir) * Math.PI/180) * rP; nY = cY + Math.sin((nAngle - 90 * dir) * Math.PI/180) * rP;
+                pLen = (60 / 360) * 2 * Math.PI * CENTER_RADIUS;
+            }
+            if (isHome) { ctx.strokeStyle = "white"; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(x + Math.cos(angle*Math.PI/180+Math.PI/2)*trackPixels/2, y + Math.sin(angle*Math.PI/180+Math.PI/2)*trackPixels/2); ctx.lineTo(x - Math.cos(angle*Math.PI/180+Math.PI/2)*trackPixels/2, y - Math.sin(angle*Math.PI/180+Math.PI/2)*trackPixels/2); ctx.stroke(); }
+            ctx.strokeStyle = "#888"; ctx.lineWidth = 2; ctx.beginPath();
+            let perp = (nAngle + 90) * Math.PI/180;
+            ctx.moveTo(nX + Math.cos(perp)*trackPixels/2, nY + Math.sin(perp)*trackPixels/2); ctx.lineTo(nX - Math.cos(perp)*trackPixels/2, nY - Math.sin(perp)*trackPixels/2);
+            ctx.stroke(); ctx.restore();
+            return { x: nX, y: nY, angle: nAngle, len: pLen, prevX: x, prevY: y, prevAngle: angle };
+        }
+
+        canvas.addEventListener('click', (e) => {
+            if (dragThreshold) return;
+            const rect = canvas.getBoundingClientRect();
+            const mx = (e.clientX - rect.left - offset.x) / scale;
+            const my = (e.clientY - rect.top - offset.y) / scale;
+            let curX = 0, curY = 0, curAngle = 0, found = -1;
+            track.forEach((type, i) => {
+                let midX, midY;
+                if (type === 'S') {
+                    midX = curX + Math.cos(curAngle*Math.PI/180)*(REAL_STRAIGHT*PPI/2);
+                    midY = curY + Math.sin(curAngle*Math.PI/180)*(REAL_STRAIGHT*PPI/2);
+                } else {
+                    let dir = type === 'R' ? 1 : -1, rP = CENTER_RADIUS * PPI;
+                    let cX = curX + Math.cos((curAngle + 90 * dir) * Math.PI/180) * rP, cY = curY + Math.sin((curAngle + 90 * dir) * Math.PI/180) * rP;
+                    let midA = curAngle + (30 * dir);
+                    midX = cX + Math.cos((midA - 90 * dir) * Math.PI/180) * rP; midY = cY + Math.sin((midA - 90 * dir) * Math.PI/180) * rP;
+                }
+                if (Math.hypot(mx - midX, my - midY) < (TRACK_WIDTH * PPI)) found = i;
+                if (type === 'S') { curX += Math.cos(curAngle*Math.PI/180)*REAL_STRAIGHT*PPI; curY += Math.sin(curAngle*Math.PI/180)*REAL_STRAIGHT*PPI; }
+                else {
+                    let dir = type === 'R' ? 1 : -1, rP = CENTER_RADIUS * PPI;
+                    let cX = curX + Math.cos((curAngle + 90 * dir) * Math.PI/180) * rP, cY = curY + Math.sin((curAngle + 90 * dir) * Math.PI/180) * rP;
+                    curAngle += (60 * dir);
+                    curX = cX + Math.cos((curAngle - 90 * dir) * Math.PI/180) * rP; curY = cY + Math.sin((curAngle - 90 * dir) * Math.PI/180) * rP;
+                }
+            });
+            selectedIdx = found;
+            document.getElementById('editPanel').style.display = found > -1 ? 'flex' : 'none';
+            draw();
+        });
+
+        function modifyPiece(action) {
+            if (selectedIdx === -1) return;
+            if (action === 'DEL') track.splice(selectedIdx, 1);
+            else track[selectedIdx] = action;
+            closeEdit();
+        }
+
+        function insertPiece(type) {
+            if (selectedIdx === -1) return;
+            track.splice(selectedIdx + 1, 0, type); // Add immediately after selection
+            closeEdit();
+        }
+
+        function closeEdit() { selectedIdx = -1; document.getElementById('editPanel').style.display = 'none'; draw(); }
+        function addPiece(t) { track.push(t); draw(); }
+        function undo() { track.pop(); draw(); }
+        function reset() { if(confirm("Clear layout?")) { track = []; draw(); } }
+        function centerTrack() { scale = 0.4; offset = { x: window.innerWidth/2, y: window.innerHeight/2 }; draw(); }
+        function syncTrack() {
+            const input = prompt("Track Layout:", track.join(''));
+            if (input !== null) { track = input.toUpperCase().replace(/[^SLR]/g, '').split(''); draw(); }
+        }
+
+        canvas.onmousedown = (e) => { isDragging = true; dragThreshold = false; lastPos = { x: e.clientX, y: e.clientY }; };
+        window.onmousemove = (e) => { if (isDragging) { if (Math.hypot(e.clientX-lastPos.x, e.clientY-lastPos.y) > 5) dragThreshold = true; offset.x += e.clientX - lastPos.x; offset.y += e.clientY - lastPos.y; lastPos = { x: e.clientX, y: e.clientY }; draw(); } };
+        window.onmouseup = () => isDragging = false;
+        canvas.onwheel = (e) => { e.preventDefault(); scale *= (e.deltaY < 0 ? 1.1 : 0.9); draw(); };
+        draw();
+    </script>
+</body>
+</html>
