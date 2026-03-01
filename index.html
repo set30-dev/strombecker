@@ -5,7 +5,7 @@
     <title>Strombecker Designer v2.0.14</title>
     <style>
         body { font-family: sans-serif; background: #1a1a1a; color: white; margin: 0; overflow: hidden; touch-action: none; }
-        canvas { background: #222; display: block; cursor: grab; touch-action: none; }
+        canvas { background: #222; display: block; cursor: grab; }
         .toolbar { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.9); padding: 10px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; border-top: 2px solid #444; z-index: 10; }
         .info-panel { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; pointer-events: none; }
         button { padding: 12px 2px; font-size: 11px; font-weight: bold; cursor: pointer; background: #444; color: white; border: 1px solid #666; border-radius: 6px; }
@@ -40,10 +40,10 @@
     <canvas id="trackCanvas"></canvas>
     
     <div class="toolbar">
-        <button onclick="addPiece('S')">STRAIGHT (S)</button>
-        <button onclick="addPiece('L')">LEFT (L)</button>
-        <button onclick="addPiece('R')">RIGHT (R)</button>
-        <button class="x-btn" onclick="addPiece('X')">CROSSOVER (X)</button>
+        <button onmouseenter="setGhost('S')" onmouseleave="setGhost(null)" onclick="addPiece('S')">STRAIGHT (S)</button>
+        <button onmouseenter="setGhost('L')" onmouseleave="setGhost(null)" onclick="addPiece('L')">LEFT (L)</button>
+        <button onmouseenter="setGhost('R')" onmouseleave="setGhost(null)" onclick="addPiece('R')">RIGHT (R)</button>
+        <button class="x-btn" onmouseenter="setGhost('X')" onmouseleave="setGhost(null)" onclick="addPiece('X')">CROSSOVER (X)</button>
         <button class="danger" onclick="undo()">UNDO LAST</button>
         <button style="background:#4a4a2e" onclick="syncTrack()">IMPORT/EXPORT</button>
         <button style="background:#2e4a4a" onclick="centerTrack()">CENTER</button>
@@ -61,7 +61,7 @@
         let ghostPiece = null;
         let scale = 0.4, offset = { x: window.innerWidth/2, y: window.innerHeight/2 };
         let isDragging = false, lastPos = { x: 0, y: 0 };
-        let lastTouchDist = 0; // For pinch zoom
+        let initialDist = null;
 
         window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; draw(); };
         window.onresize();
@@ -71,18 +71,28 @@
             ctx.save(); ctx.translate(offset.x, offset.y); ctx.scale(scale, scale);
 
             let curX = 0, curY = 0, curAngle = 0;
-            let l1Dist = 0, l2Dist = 0, carRedSlot = 0; 
+            let l1Dist = 0, l2Dist = 0;
+            let carRedSlot = 0; 
             let bounds = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
             let counts = { S: 0, C: 0, X: 0 };
 
             track.forEach((type, index) => {
                 let res = renderPiece(type, curX, curY, curAngle, false, index % 2 === 0, index === 0, carRedSlot);
-                if (type === 'S') counts.S++; else if (type === 'X') counts.X++; else counts.C++;
+                
+                if (type === 'S') counts.S++;
+                else if (type === 'X') counts.X++;
+                else counts.C++;
 
-                if (carRedSlot === 0) { l1Dist += res.distLeft; l2Dist += res.distRight; } 
-                else { l1Dist += res.distRight; l2Dist += res.distLeft; }
+                if (carRedSlot === 0) {
+                    l1Dist += res.distLeft;
+                    l2Dist += res.distRight;
+                } else {
+                    l1Dist += res.distRight;
+                    l2Dist += res.distLeft;
+                }
 
                 if (type === 'X') carRedSlot = 1 - carRedSlot;
+                
                 curX = res.x; curY = res.y; curAngle = res.angle;
                 bounds.minX = Math.min(bounds.minX, curX); bounds.maxX = Math.max(bounds.maxX, curX);
                 bounds.minY = Math.min(bounds.minY, curY); bounds.maxY = Math.max(bounds.maxY, curY);
@@ -106,20 +116,30 @@
             const slotOff = (SLOT_SPACING / 2) * PPI;
             const rad = angle * Math.PI / 180;
             ctx.lineCap = "butt";
-            ctx.strokeStyle = isGhost ? "rgba(255,255,255,0.1)" : (isHome ? "#4682B4" : (type === 'X' ? "#222" : (altColor ? "#333" : "#3d3d3d")));
-            if (isGhost) ctx.setLineDash([10,10]);
+            
+            if (isGhost) { 
+                ctx.strokeStyle = "rgba(255,255,255,0.1)"; 
+                ctx.setLineDash([10,10]); 
+            } else { 
+                ctx.strokeStyle = isHome ? "#4682B4" : (type === 'X' ? "#222" : (altColor ? "#333" : "#3d3d3d")); 
+            }
             ctx.lineWidth = TRACK_WIDTH * PPI;
 
             let nX, nY, nAngle = angle, distLeft, distRight;
+
             if (type === 'S' || type === 'X') {
                 let d = REAL_STRAIGHT * PPI;
                 nX = x + Math.cos(rad) * d; nY = y + Math.sin(rad) * d;
                 ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nX, nY); ctx.stroke();
+                
                 distLeft = distRight = (type === 'S') ? REAL_STRAIGHT : Math.sqrt(Math.pow(REAL_STRAIGHT, 2) + Math.pow(SLOT_SPACING, 2));
+
                 if (!isGhost) {
                     ctx.setLineDash([]); ctx.lineWidth = 2.5;
                     let p1 = rad - Math.PI/2, p2 = rad + Math.PI/2;
-                    let cLeft = (carRedSlot === 0) ? "#ff4444" : "#44aaff", cRight = (carRedSlot === 1) ? "#ff4444" : "#44aaff";
+                    let cLeft = (carRedSlot === 0) ? "#ff4444" : "#44aaff";
+                    let cRight = (carRedSlot === 1) ? "#ff4444" : "#44aaff";
+
                     if (type === 'S') {
                         ctx.strokeStyle = cLeft; ctx.beginPath(); ctx.moveTo(x+Math.cos(p1)*slotOff, y+Math.sin(p1)*slotOff); ctx.lineTo(nX+Math.cos(p1)*slotOff, nY+Math.sin(p1)*slotOff); ctx.stroke();
                         ctx.strokeStyle = cRight; ctx.beginPath(); ctx.moveTo(x+Math.cos(p2)*slotOff, y+Math.sin(p2)*slotOff); ctx.lineTo(nX+Math.cos(p2)*slotOff, nY+Math.sin(p2)*slotOff); ctx.stroke();
@@ -133,10 +153,17 @@
                 let rP = CENTER_RADIUS * PPI;
                 let cX = x + Math.cos((angle+90*dir)*Math.PI/180)*rP, cY = y + Math.sin((angle+90*dir)*Math.PI/180)*rP;
                 let sA = (angle-90*dir)*Math.PI/180, eA = sA + (60 * dir * Math.PI/180);
+                
                 ctx.beginPath(); ctx.arc(cX, cY, rP, sA, eA, dir === -1); ctx.stroke();
-                nAngle = angle + (60 * dir); nX = cX + Math.cos((nAngle-90*dir)*Math.PI/180)*rP; nY = cY + Math.sin((nAngle-90*dir)*Math.PI/180)*rP;
-                let dIn = (60/360)*2*Math.PI*(CENTER_RADIUS - (SLOT_SPACING/2)), dOut = (60/360)*2*Math.PI*(CENTER_RADIUS + (SLOT_SPACING/2));
-                distLeft = (type === 'L') ? dIn : dOut; distRight = (type === 'L') ? dOut : dIn;
+                nAngle = angle + (60 * dir);
+                nX = cX + Math.cos((nAngle-90*dir)*Math.PI/180)*rP; nY = cY + Math.sin((nAngle-90*dir)*Math.PI/180)*rP;
+                
+                let dIn = (60/360)*2*Math.PI*(CENTER_RADIUS - (SLOT_SPACING/2));
+                let dOut = (60/360)*2*Math.PI*(CENTER_RADIUS + (SLOT_SPACING/2));
+                
+                if (type === 'L') { distLeft = dIn; distRight = dOut; }
+                else { distLeft = dOut; distRight = dIn; }
+
                 if (!isGhost) {
                     ctx.setLineDash([]); ctx.lineWidth = 2.5;
                     ctx.strokeStyle = (carRedSlot === 0) ? "#ff4444" : "#44aaff";
@@ -149,38 +176,6 @@
             return { x: nX, y: nY, angle: nAngle, distLeft, distRight };
         }
 
-        // Mobile Touch Handlers
-        canvas.addEventListener('touchstart', (e) => {
-            isDragging = true;
-            if (e.touches.length === 2) {
-                lastTouchDist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
-            } else {
-                lastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            }
-        });
-
-        canvas.addEventListener('touchmove', (e) => {
-            if (!isDragging) return;
-            if (e.touches.length === 2) {
-                let dist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
-                scale *= (dist / lastTouchDist);
-                lastTouchDist = dist;
-            } else {
-                offset.x += e.touches[0].clientX - lastPos.x;
-                offset.y += e.touches[0].clientY - lastPos.y;
-                lastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            }
-            draw();
-        });
-
-        canvas.addEventListener('touchend', () => { isDragging = false; lastTouchDist = 0; });
-
-        // Desktop Handlers
-        canvas.onmousedown = (e) => { isDragging = true; lastPos = { x: e.clientX, y: e.clientY }; };
-        window.onmousemove = (e) => { if (isDragging) { offset.x += e.clientX-lastPos.x; offset.y += e.clientY-lastPos.y; lastPos = { x: e.clientX, y: e.clientY }; draw(); } };
-        window.onmouseup = () => isDragging = false;
-        canvas.onwheel = (e) => { e.preventDefault(); scale *= (e.deltaY < 0 ? 1.1 : 0.9); draw(); };
-
         function setGhost(t) { ghostPiece = t; draw(); }
         function addPiece(t) { track.push(t); draw(); }
         function undo() { track.pop(); draw(); }
@@ -190,6 +185,41 @@
             const input = prompt("Import/Export Track string (S, L, R, X):", track.join(''));
             if (input !== null) { track = input.toUpperCase().replace(/[^SLRX]/g, '').split(''); draw(); }
         }
+
+        // --- Interaction Handlers ---
+        canvas.addEventListener('touchstart', (e) => {
+            isDragging = true;
+            if (e.touches.length === 2) {
+                initialDist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+            } else {
+                lastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+        }, { passive: false });
+
+        window.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+            if (e.touches.length === 2 && initialDist !== null) {
+                const currentDist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+                const zoomFactor = currentDist / initialDist;
+                scale *= zoomFactor;
+                initialDist = currentDist;
+                draw();
+            } else if (e.touches.length === 1) {
+                offset.x += e.touches[0].clientX - lastPos.x;
+                offset.y += e.touches[0].clientY - lastPos.y;
+                lastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                draw();
+            }
+            e.preventDefault();
+        }, { passive: false });
+
+        window.addEventListener('touchend', () => { isDragging = false; initialDist = null; });
+
+        canvas.onmousedown = (e) => { isDragging = true; lastPos = { x: e.clientX, y: e.clientY }; };
+        window.onmousemove = (e) => { if (isDragging) { offset.x += e.clientX-lastPos.x; offset.y += e.clientY-lastPos.y; lastPos = { x: e.clientX, y: e.clientY }; draw(); } };
+        window.onmouseup = () => isDragging = false;
+        canvas.onwheel = (e) => { e.preventDefault(); scale *= (e.deltaY < 0 ? 1.1 : 0.9); draw(); };
+        
         draw();
     </script>
 </body>
