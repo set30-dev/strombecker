@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Strombecker Designer v1.7</title>
+    <title>Strombecker Designer v1.9</title>
     <style>
         body { font-family: sans-serif; background: #1a1a1a; color: white; margin: 0; overflow: hidden; touch-action: none; }
         canvas { background: #222; display: block; cursor: grab; }
@@ -16,14 +16,17 @@
         .sync-btn { background: #4a4a2e; }
         .danger { background: #633; }
         .badge { background: rgba(0,0,0,0.8); padding: 6px 12px; border-radius: 20px; border: 1px solid #00ffcc; color: #00ffcc; font-size: 12px; font-weight: bold; min-width: 60px; text-align: center; }
+        .table-size { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); background: rgba(0,255,204,0.15); color: #00ffcc; padding: 4px 12px; border-radius: 4px; font-size: 14px; border: 1px solid #00ffcc; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="info-panel">
         <div class="badge" id="inventory">Pieces: 0</div>
-        <div class="version-top">v1.7 Unified</div>
+        <div class="version-top">v1.9 Bounding Fix</div>
         <div class="badge" id="trackLength">0.0 ft</div>
     </div>
+
+    <div class="table-size" id="tableDimensions">Table: 0' x 0'</div>
 
     <canvas id="trackCanvas"></canvas>
     
@@ -32,9 +35,7 @@
         <button onmouseenter="setGhost('L')" onmouseleave="setGhost(null)" onclick="addPiece('L')">LEFT (L)</button>
         <button onmouseenter="setGhost('R')" onmouseleave="setGhost(null)" onclick="addPiece('R')">RIGHT (R)</button>
         <button class="danger" onclick="undo()">UNDO</button>
-        
         <button class="sync-btn" onclick="syncTrack()">IMPORT / EXPORT</button>
-        
         <button class="special" onclick="centerTrack()">CENTER</button>
         <button class="danger" onclick="reset()">RESET ALL</button>
     </div>
@@ -49,7 +50,7 @@
         const CENTER_RADIUS = (OUTSIDE_DIAMETER / 2) - (TRACK_WIDTH / 2); 
         const PPI = 15; 
 
-        let track = JSON.parse(localStorage.getItem('strom_v17')) || [];
+        let track = JSON.parse(localStorage.getItem('strom_v19')) || [];
         let ghostPiece = null;
         let scale = 0.4;
         let offset = { x: window.innerWidth/2, y: window.innerHeight/2 };
@@ -65,32 +66,79 @@
             ctx.scale(scale, scale);
 
             let curX = 0, curY = 0, curAngle = 0, totalInches = 0;
-            
+            let bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+
+            function updateBoundsFromPoint(px, py, angle) {
+                const hw = (TRACK_WIDTH / 2) * PPI;
+                const rad = angle * Math.PI / 180;
+                // Calculate the two edge points of the track at this specific connection point
+                const corners = [
+                    { x: px + Math.cos(rad + Math.PI/2) * hw, y: py + Math.sin(rad + Math.PI/2) * hw },
+                    { x: px + Math.cos(rad - Math.PI/2) * hw, y: py + Math.sin(rad - Math.PI/2) * hw }
+                ];
+                corners.forEach(c => {
+                    bounds.minX = Math.min(bounds.minX, c.x);
+                    bounds.maxX = Math.max(bounds.maxX, c.x);
+                    bounds.minY = Math.min(bounds.minY, c.y);
+                    bounds.maxY = Math.max(bounds.maxY, c.y);
+                });
+            }
+
             // Start Line (Yellow)
             ctx.strokeStyle = "yellow"; ctx.lineWidth = 4;
             ctx.beginPath(); ctx.moveTo(0, -50); ctx.lineTo(0, 50); ctx.stroke();
+            updateBoundsFromPoint(0, 0, 0);
 
             track.forEach((type, index) => {
                 let res = renderPiece(type, curX, curY, curAngle, false, index % 2 === 0);
                 curX = res.x; curY = res.y; curAngle = res.angle; totalInches += res.len;
+                updateBoundsFromPoint(curX, curY, curAngle);
+                
+                // For curves, we also need to check the "apex" of the curve for bounds
+                if (type !== 'S') {
+                    let dir = type === 'R' ? 1 : -1;
+                    let rP = CENTER_RADIUS * PPI;
+                    let cX = res.prevX + Math.cos((res.prevAngle + 90 * dir) * Math.PI/180) * rP;
+                    let cY = res.prevY + Math.sin((res.prevAngle + 90 * dir) * Math.PI/180) * rP;
+                    // Check extreme points (top, bottom, left, right) of the arc
+                    for(let a=0; a<=60; a+=15) {
+                        let checkAngle = res.prevAngle + (a * dir);
+                        let px = cX + Math.cos((checkAngle - 90 * dir) * Math.PI/180) * rP;
+                        let py = cY + Math.sin((checkAngle - 90 * dir) * Math.PI/180) * rP;
+                        updateBoundsFromPoint(px, py, checkAngle);
+                    }
+                }
             });
 
             if (ghostPiece) renderPiece(ghostPiece, curX, curY, curAngle, true);
 
+            if (track.length > 0) {
+                ctx.setLineDash([5, 5]);
+                ctx.strokeStyle = "rgba(0, 255, 204, 0.4)";
+                ctx.lineWidth = 2;
+                ctx.strokeRect(bounds.minX, bounds.minY, bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+                ctx.setLineDash([]);
+                
+                const wIn = (bounds.maxX - bounds.minX) / PPI;
+                const hIn = (bounds.maxY - bounds.minY) / PPI;
+                document.getElementById('tableDimensions').innerText = 
+                    `Required Table: ${Math.floor(wIn/12)}' ${Math.round(wIn%12)}" x ${Math.floor(hIn/12)}' ${Math.round(hIn%12)}"`;
+            } else {
+                document.getElementById('tableDimensions').innerText = "Table: 0' x 0'";
+            }
+
             ctx.restore();
             document.getElementById('inventory').innerText = `Pieces: ${track.length}`;
             document.getElementById('trackLength').innerText = `${(totalInches/12).toFixed(1)} ft`;
-            localStorage.setItem('strom_v17', JSON.stringify(track));
+            localStorage.setItem('strom_v19', JSON.stringify(track));
         }
 
         function renderPiece(type, x, y, angle, isGhost, altColor = false) {
             ctx.save();
             let trackPixels = TRACK_WIDTH * PPI;
             ctx.lineCap = "butt";
-            
             if (isGhost) { 
-                ctx.strokeStyle = "rgba(0, 255, 204, 0.3)"; ctx.lineWidth = trackPixels; 
-                ctx.setLineDash([10, 10]); 
+                ctx.strokeStyle = "rgba(0, 255, 204, 0.3)"; ctx.lineWidth = trackPixels; ctx.setLineDash([10, 10]); 
             } else { 
                 ctx.strokeStyle = altColor ? "#333" : "#3d3d3d"; ctx.lineWidth = trackPixels;
             }
@@ -119,16 +167,14 @@
             }
             if (!isGhost) drawSeam(nX, nY, nAngle);
             ctx.restore();
-            return { x: nX, y: nY, angle: nAngle, len: pLen };
+            return { x: nX, y: nY, angle: nAngle, len: pLen, prevX: x, prevY: y, prevAngle: angle };
         }
 
         function drawLanes(x, y, x2, y2, angle, shape, r, sA, eA, anti) {
-            ctx.save();
-            ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.lineWidth = 1;
+            ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.lineWidth = 1;
             let offset = (TRACK_WIDTH * PPI) / 4;
             if(shape === 'S') {
-                let dx = Math.cos((angle+90)*Math.PI/180) * offset;
-                let dy = Math.sin((angle+90)*Math.PI/180) * offset;
+                let dx = Math.cos((angle+90)*Math.PI/180) * offset, dy = Math.sin((angle+90)*Math.PI/180) * offset;
                 ctx.beginPath(); ctx.moveTo(x+dx, y+dy); ctx.lineTo(x2+dx, y2+dy); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(x-dx, y-dy); ctx.lineTo(x2-dx, y2-dy); ctx.stroke();
             } else {
@@ -140,23 +186,16 @@
 
         function drawSeam(x, y, angle) {
             ctx.save(); ctx.strokeStyle = "#888"; ctx.lineWidth = 2; ctx.beginPath();
-            let perp = (angle + 90) * Math.PI/180;
-            let hw = (TRACK_WIDTH * PPI) / 2;
+            let perp = (angle + 90) * Math.PI/180, hw = (TRACK_WIDTH * PPI) / 2;
             ctx.moveTo(x + Math.cos(perp)*hw, y + Math.sin(perp)*hw);
             ctx.lineTo(x - Math.cos(perp)*hw, y - Math.sin(perp)*hw);
             ctx.stroke(); ctx.restore();
         }
 
-        // --- NEW SYNC LOGIC ---
         function syncTrack() {
             const currentString = track.join('');
-            const input = prompt("Track Layout (S=Straight, L=Left, R=Right):", currentString);
-            
-            if (input !== null) { // User didn't click cancel
-                const filtered = input.toUpperCase().replace(/[^SLR]/g, '').split('');
-                track = filtered;
-                draw();
-            }
+            const input = prompt("Track Layout (S, L, R):", currentString);
+            if (input !== null) { track = input.toUpperCase().replace(/[^SLR]/g, '').split(''); draw(); }
         }
 
         function setGhost(type) { ghostPiece = type; draw(); }
@@ -165,7 +204,6 @@
         function reset() { if(confirm("Clear layout?")) { track = []; draw(); } }
         function centerTrack() { scale = 0.4; offset = { x: window.innerWidth/2, y: window.innerHeight/2 }; draw(); }
 
-        // Controls
         canvas.onmousedown = (e) => { isDragging = true; lastPos = { x: e.clientX, y: e.clientY }; };
         window.onmousemove = (e) => { if (isDragging) { offset.x += e.clientX - lastPos.x; offset.y += e.clientY - lastPos.y; lastPos = { x: e.clientX, y: e.clientY }; draw(); } };
         window.onmouseup = () => isDragging = false;
