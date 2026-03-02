@@ -2,14 +2,13 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Strombecker Designer v2.0.17</title>
+    <title>Strombecker Designer v2.0.20</title>
     <style>
         body { font-family: sans-serif; background: #1a1a1a; color: white; margin: 0; overflow: hidden; touch-action: none; }
         canvas { background: #222; display: block; cursor: grab; }
         .toolbar { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.9); padding: 10px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; border-top: 2px solid #444; z-index: 10; }
         .info-panel { position: absolute; top: 10px; right: 10px; pointer-events: none; }
         
-        /* Increased by 15%: 18px -> 20.7px */
         .main-title { position: absolute; top: 10px; width: 100%; text-align: center; font-size: 20.7px; font-weight: bold; letter-spacing: 1px; color: #eee; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); pointer-events: none; z-index: 5; }
         
         button { padding: 12px 2px; font-size: 11px; font-weight: bold; cursor: pointer; background: #444; color: white; border: 1px solid #666; border-radius: 6px; }
@@ -19,15 +18,11 @@
         .stats-container { position: absolute; top: 45px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
         
         .inventory { display: flex; gap: 10px; pointer-events: auto; }
-        /* Increased by 15%: 12px -> 13.8px */
         .inv-item { background: rgba(0,0,0,0.8); padding: 5px 12px; border-radius: 4px; border: 1px solid #555; font-size: 13.8px; text-align: center; }
-        /* Increased by 15%: 9px -> 10.35px */
         .inv-label { display: block; font-size: 10.35px; color: #aaa; text-transform: uppercase; }
         
-        /* Increased by 15%: 14px -> 16.1px */
         .table-size { background: rgba(255,255,255,0.05); color: #ccc; padding: 4px 12px; border-radius: 4px; font-size: 16.1px; border: 1px solid #444; font-weight: bold; pointer-events: auto; }
         
-        /* Increased by 15%: 12px -> 13.8px */
         .badge { background: rgba(0,0,0,0.85); padding: 8px 15px; border-radius: 8px; border: 1px solid #444; color: #fff; font-size: 13.8px; line-height: 1.4; pointer-events: auto; text-align: center; }
         .l1-text { color: #ff4444; font-weight: bold; }
         .l2-text { color: #44aaff; font-weight: bold; }
@@ -36,10 +31,10 @@
     </style>
 </head>
 <body>
-    <div class="main-title">1/32 Scale Strombecker Track</div>
+    <div class="main-title">1/32 Scale Strombecker Track Layout</div>
 
     <div class="info-panel">
-        <div style="color:rgba(255,255,255,0.3); font-size:10px; font-weight: bold;">v2.0.17</div>
+        <div style="color:rgba(255,255,255,0.3); font-size:10px; font-weight: bold;">v2.0.20</div>
     </div>
 
     <div class="stats-container">
@@ -77,6 +72,7 @@
         const REAL_STRAIGHT = 12.125, OUTSIDE_DIAMETER = 28.0, TRACK_WIDTH = 7.0; 
         const SLOT_SPACING = 3.5, PPI = 15;
         const CENTER_RADIUS = (OUTSIDE_DIAMETER / 2) - (TRACK_WIDTH / 2); 
+        const HALF_TRACK_PX = (TRACK_WIDTH / 2) * PPI;
 
         let track = JSON.parse(localStorage.getItem('strom_v2013')) || [];
         let ghostPiece = null;
@@ -87,6 +83,26 @@
         window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; draw(); };
         window.onresize();
 
+        // Helper to expand bounds to include a point + track width margin
+        function expandBounds(bounds, x, y, angle) {
+            const rad = angle * Math.PI / 180;
+            const perpX = Math.cos(rad + Math.PI/2) * HALF_TRACK_PX;
+            const perpY = Math.sin(rad + Math.PI/2) * HALF_TRACK_PX;
+            
+            // Check both edges of the track width at this specific point
+            const pts = [
+                { x: x + perpX, y: y + perpY },
+                { x: x - perpX, y: y - perpY }
+            ];
+
+            pts.forEach(p => {
+                if (p.x < bounds.minX) bounds.minX = p.x;
+                if (p.x > bounds.maxX) bounds.maxX = p.x;
+                if (p.y < bounds.minY) bounds.minY = p.y;
+                if (p.y > bounds.maxY) bounds.maxY = p.y;
+            });
+        }
+
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.save(); ctx.translate(offset.x, offset.y); ctx.scale(scale, scale);
@@ -94,10 +110,14 @@
             let curX = 0, curY = 0, curAngle = 0;
             let l1Dist = 0, l2Dist = 0;
             let carRedSlot = 0; 
-            let bounds = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+            let bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
             let counts = { S: 0, C: 0, X: 0 };
 
+            // Initial check for the start line
+            expandBounds(bounds, 0, 0, 0);
+
             track.forEach((type, index) => {
+                let prevX = curX, prevY = curY, prevAngle = curAngle;
                 let res = renderPiece(type, curX, curY, curAngle, false, index % 2 === 0, index === 0, carRedSlot);
                 
                 if (type === 'S') counts.S++;
@@ -115,9 +135,35 @@
                 if (type === 'X') carRedSlot = 1 - carRedSlot;
                 
                 curX = res.x; curY = res.y; curAngle = res.angle;
-                bounds.minX = Math.min(bounds.minX, curX); bounds.maxX = Math.max(bounds.maxX, curX);
-                bounds.minY = Math.min(bounds.minY, curY); bounds.maxY = Math.max(bounds.maxY, curY);
+
+                // For straights/crossovers, just check the end point
+                if (type === 'S' || type === 'X') {
+                    expandBounds(bounds, curX, curY, curAngle);
+                } else {
+                    // For curves, we must sample the arc to find the true outer "bulge"
+                    // Check start, middle (30 deg), and end (60 deg)
+                    let dir = (type === 'R') ? 1 : -1;
+                    let rP = CENTER_RADIUS * PPI;
+                    let cX = prevX + Math.cos((prevAngle+90*dir)*Math.PI/180)*rP;
+                    let cY = prevY + Math.sin((prevAngle+90*dir)*Math.PI/180)*rP;
+                    
+                    for (let step = 0; step <= 60; step += 15) {
+                        let stepAngle = prevAngle + (step * dir);
+                        let pX = cX + Math.cos((stepAngle-90*dir)*Math.PI/180)*rP;
+                        let pY = cY + Math.sin((stepAngle-90*dir)*Math.PI/180)*rP;
+                        expandBounds(bounds, pX, pY, stepAngle);
+                    }
+                }
             });
+
+            // Draw Dynamic Border
+            if (track.length > 0) {
+                ctx.strokeStyle = "rgba(70, 130, 180, 0.7)"; 
+                ctx.lineWidth = 3;
+                ctx.setLineDash([15, 15]);
+                ctx.strokeRect(bounds.minX, bounds.minY, bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+                ctx.setLineDash([]);
+            }
 
             if (ghostPiece) renderPiece(ghostPiece, curX, curY, curAngle, true, false, false, carRedSlot);
             ctx.restore();
@@ -127,8 +173,13 @@
             document.getElementById('count-C').innerText = counts.C;
             document.getElementById('count-X').innerText = counts.X;
 
-            const wIn = (bounds.maxX-bounds.minX)/PPI, hIn = (bounds.maxY-bounds.minY)/PPI;
-            document.getElementById('tableDimensions').innerText = `Table: ${Math.floor(wIn/12)}' ${Math.round(wIn%12)}" x ${Math.floor(hIn/12)}' ${Math.round(hIn%12)}"`;
+            if (track.length > 0) {
+                const wIn = (bounds.maxX-bounds.minX)/PPI, hIn = (bounds.maxY-bounds.minY)/PPI;
+                document.getElementById('tableDimensions').innerText = `Table: ${Math.floor(wIn/12)}' ${Math.round(wIn%12)}" x ${Math.floor(hIn/12)}' ${Math.round(hIn%12)}"`;
+            } else {
+                document.getElementById('tableDimensions').innerText = `Table: 0' 0" x 0' 0"`;
+            }
+            
             localStorage.setItem('strom_v2013', JSON.stringify(track));
         }
 
@@ -207,7 +258,7 @@
             if (input !== null) { track = input.toUpperCase().replace(/[^SLRX]/g, '').split(''); draw(); }
         }
 
-        // Improved Touch Interaction for Mobile
+        // Interaction Handlers
         canvas.addEventListener('touchstart', (e) => {
             isDragging = true;
             if (e.touches.length === 2) {
@@ -235,8 +286,6 @@
         }, { passive: false });
 
         window.addEventListener('touchend', () => { isDragging = false; initialDist = null; });
-
-        // Mouse Handlers
         canvas.onmousedown = (e) => { isDragging = true; lastPos = { x: e.clientX, y: e.clientY }; };
         window.onmousemove = (e) => { if (isDragging) { offset.x += e.clientX-lastPos.x; offset.y += e.clientY-lastPos.y; lastPos = { x: e.clientX, y: e.clientY }; draw(); } };
         window.onmouseup = () => isDragging = false;
