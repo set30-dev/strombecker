@@ -4,6 +4,6 @@ I created this layout tool with Gemini to help me determine which layout works w
 ## Import/Export
 - **You can import or export a layout, S=straight, L=Left Curve, R=Right Curve, X= Cross track.
 ## Layout Examples
-- **Le Mans, France - SSSSSSSSSLLLRLSSSSSRSLLLRSLL
-- **Monaco - SSSSLSSLSLRLSLLSSRRSSSSLLSSSSSSLLLSSSSRR
-- 
+- Le Mans, France - SSSSSSSSSLLLRLSSSSSRSLLLRSLL
+- Monaco - SSSSLSSLSLRLSLLSSRRSSSSLLSSSSSSLLLSSSSRR
+  
